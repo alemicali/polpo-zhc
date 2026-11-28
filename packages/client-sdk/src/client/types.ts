@@ -564,6 +564,7 @@ export interface AgentConfig {
 
   // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*"])
   // Note: HTTP tools (http_fetch, http_download) and vault tools (vault_get, vault_list) are always available as core tools.
+  // Agents on a Claude Code / Codex / OpenCode harness also get run_with_vault (granted by "run_with_vault" or "bash", or no list).
   /** Browser profile name for persistent context (cookies, auth). Used with agent-browser --profile. */
   browserProfile?: string;
   /** Name of an egress proxy (settings.egressProxies) its browser goes out through. */

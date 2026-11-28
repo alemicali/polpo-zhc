@@ -79,7 +79,7 @@ export function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("docx_")) return { icon: FileText, ...kind(1) };
   if (n.startsWith("email_")) return { icon: Mail, ...kind(10) };
   if (n.startsWith("phone_")) return { icon: PhoneCall, ...kind(8) };
-  if (n.startsWith("vault_")) return { icon: KeyRound, ...kind(5) };
+  if (n.startsWith("vault_") || n === "run_with_vault") return { icon: KeyRound, ...kind(5) };
   if (n.startsWith("audio_")) return { icon: Mic, ...kind(10) };
   if (n.startsWith("image_")) return { icon: Image, ...kind(3) };
   if (n.startsWith("video_")) return { icon: Video, ...kind(2) };
@@ -119,7 +119,13 @@ export function getSkillMeta(name: string): { icon: LucideIcon; color: string } 
 
 // ── Tool category definitions ──
 
-export const toolCategories: { prefix: string; label: string; tools: string; icon: LucideIcon; color: string }[] = [
+export type ToolCategory = {
+  prefix: string; label: string; tools: string; icon: LucideIcon; color: string;
+  /** Other allowedTools entries that grant it too (run_with_vault: bash). */
+  grantedBy?: string[];
+};
+
+export const toolCategories: ToolCategory[] = [
   { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ...", icon: Globe, color: kind(7).color },
   { prefix: "email_", label: "Email", tools: "email_send, email_draft, email_verify, email_list, email_read, email_search, email_count, email_download_attachment", icon: Mail, color: kind(10).color },
   { prefix: "image_", label: "Image", tools: "image_generate, image_edit (the instance's image model, Settings → Media), image_analyze (a chat turn with the image)", icon: Image, color: kind(3).color },
@@ -133,8 +139,17 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "send_notification", label: "Notifications", tools: "send_notification (post to the notification channels and targets set in the agent's Notifications section: Slack, Telegram, email, webhook, push…)", icon: BellRing, color: kind(1).color },
   { prefix: "request_computer_takeover", label: "Take control", tools: "request_computer_takeover (on a remote computer: a person takes control of the desktop for a login, 2FA or CAPTCHA and gives it back; on by default with a headed browser)", icon: Hand, color: kind(7).color },
   { prefix: "vault_create_login", label: "Create logins", tools: "vault_create_login (sign up for a site: a login in its own vault with a password Polpo generates, filled with browser_fill from_vault; the agent never sees it)", icon: KeyRound, color: kind(5).color },
+  { prefix: "run_with_vault", label: "Vault commands", tools: "run_with_vault (agents on Claude Code / Codex / OpenCode: one command on its computer with vault secrets as environment variables, shown as *** in the output; bash in allowedTools grants it too)", icon: KeyRound, color: kind(5).color, grantedBy: ["bash"] },
   { prefix: "decide", label: "Decisions", tools: "decide (typed judgments with probabilities from the decision model: yes/no, choice, score, rank)", icon: Scale, color: kind(8).color },
 ];
+
+/** Is a tool category on for these allowedTools (its prefix, or a tool that grants it)? */
+export function categoryEnabled(category: Pick<ToolCategory, "prefix" | "grantedBy">, allowedTools: readonly string[]): boolean {
+  return allowedTools.some((t) => {
+    const n = t.toLowerCase();
+    return n.startsWith(category.prefix) || !!category.grantedBy?.includes(n);
+  });
+}
 
 // ── Task status display config ──
 

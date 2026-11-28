@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-run-with-vault",
+    date: "2026-11-28",
+    kind: "new",
+    title: "Gli agenti su Claude Code, Codex e OpenCode usano i segreti del vault nei comandi",
+    summary: "Con il nuovo strumento run_with_vault un agente su un harness esterno lancia un comando con una chiave del suo vault, senza mai vederla: nell'output resta ***.",
+    body: [
+      "- **Prima**: un agente su Claude Code, Codex o OpenCode usa la sua shell, che non legge il vault. Per usare una chiave API in un comando non aveva una strada pulita (c'è chi l'ha scritta in un file con il browser).",
+      "- **Ora** ha **`run_with_vault`**: un comando con i segreti del vault come variabili d'ambiente solo per quel comando, per esempio `{ \"command\": \"curl -H \\\"Authorization: Bearer $OPENAI_API_KEY\\\" …\", \"env_from_vault\": { \"OPENAI_API_KEY\": \"openai.api_key\" } }`.",
+      "- **Sicuro come la bash di Polpo**: il comando gira sul computer dell'agente, i valori non finiscono mai su disco né davanti al modello, e nell'output diventano `***`. Solo le voci del suo vault e quelle condivise con lui.",
+      "- **`vault_get`** torna disponibile anche a questi agenti, senza valori: nomi delle chiavi e campi non segreti (host, utente…), con l'indicazione di usare `run_with_vault`.",
+      "- **Chi lo ha**: gli agenti su harness senza elenco di strumenti, o con `run_with_vault` (oppure `bash`) negli strumenti consentiti. Gli agenti sul motore di Polpo continuano a usare `env_from_vault` della bash.",
+    ].join("\n"),
+    highlight: true,
+  },
+  {
     id: "2026-11-28-skill-versioning",
     date: "2026-11-28",
     kind: "new",

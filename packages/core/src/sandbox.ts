@@ -386,7 +386,7 @@ export interface SandboxCascade {
 export type ToolPlacement = "sandbox" | "host";
 
 export const TOOL_PLACEMENT: ReadonlyArray<{ pattern: string; placement: ToolPlacement }> = [
-  ...["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command",
+  ...["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command", "run_with_vault",
     "browser_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"].map((pattern) => ({ pattern, placement: "sandbox" as const })),
 ];
 

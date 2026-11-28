@@ -6,7 +6,7 @@
  * The bash tool runs with cwd set to the agent's primary working directory.
  */
 
-import { join, dirname, resolve, relative, isAbsolute } from "node:path";
+import { join, dirname, resolve, relative, isAbsolute, posix } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
@@ -19,7 +19,7 @@ import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createVaultToolsCore } from "./vault-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
-import { createSecretMasker, resolveEnvFromVault } from "../vault/env-from-vault.js";
+import { createSecretMasker, resolveEnvFromVault, type VaultRef } from "../vault/env-from-vault.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { createInkTools, ALL_INK_TOOL_NAMES } from "./ink-tools.js";
 import { copiedLineNumbersError, hasCopiedLineNumbers, hasEscapedLineBreaks, refuseLineNumbers, withoutLineNumbers } from "./line-number-guard.js";
@@ -401,6 +401,65 @@ export interface BashToolOptions {
    * DISPLAY, POLPO_BROWSER_SESSION). A failure never stops the command; env_from_vault wins.
    */
   commandEnv?: () => Promise<Record<string, string>>;
+  /** The run's own masker (secrets it learned while running: vault_create_login), applied after the injected values'. */
+  mask?: (text: string) => string;
+}
+
+/**
+ * One command with env_from_vault: the single secret path bash and run_with_vault share.
+ * References are resolved here, on the host, against the agent's vault (own + shared entries);
+ * the values exist only in that command's environment, and its output (result, offloaded file,
+ * error) has them and their cheap encodings replaced with ***. Only the references
+ * ("service.key") are kept in details.
+ */
+async function runCommandWithVault(
+  tool: string,
+  params: { command: string; timeout?: number; env_from_vault?: Record<string, VaultRef> },
+  run: { cwd: string; shell: Shell; toolOutputDir: string; signal?: AbortSignal },
+  opts: BashToolOptions,
+): Promise<ToolResult> {
+  const timeout = bashTimeoutMs(params.timeout);
+  const fromVault = resolveEnvFromVault(params.env_from_vault, opts.vault);
+  const envRefs = Object.keys(fromVault.refs).length > 0 ? { envFromVault: fromVault.refs } : {};
+  if (fromVault.errors.length > 0) {
+    const message = `env_from_vault: ${fromVault.errors.join("; ")}. The command was not run.`;
+    return toolError(`Error: ${message}`, { command: params.command, error: message, ...envRefs });
+  }
+  // Every value (and its base64/URL-encoded forms) becomes *** before the output reaches the
+  // model, the tool result, the offloaded file, activity logs and transcripts.
+  const injected = createSecretMasker(fromVault.secrets);
+  const runMask = opts.mask;
+  const mask = runMask ? (t: string) => runMask(injected(t)) : injected;
+  const started = Date.now();
+  try {
+    const extra = opts.commandEnv ? await opts.commandEnv().catch(() => ({} as Record<string, string>)) : {};
+    const env = { ...extra, ...fromVault.env };
+    const result = await run.shell.execute(params.command, {
+      cwd: run.cwd, timeout, ...(run.signal ? { signal: run.signal } : {}), ...(Object.keys(env).length > 0 ? { env } : {}),
+    });
+    const timedOut = result.timedOut === true
+      || (result.exitCode !== 0 && Date.now() - started >= timeout && /timed? ?out/i.test(result.stderr));
+    let output = mask(result.stdout + (result.stderr ? "\n" + result.stderr : ""));
+    if (!output.trim()) output = "(no output)";
+    // Above the limit: the full output goes to a private file, the model gets
+    // head + tail (the tail weighs more: errors and summaries come last).
+    const off = await offloadToolOutput(output, { tool, dir: run.toolOutputDir, maxChars: MAX_OUTPUT_BYTES, headRatio: 1 / 3, fs: opts.fs });
+    const head = timedOut
+      ? `Error: the command timed out after ${formatSeconds(timeout)} and was stopped. Run long-lived servers and watchers in the background `
+        + "(nohup … > log 2>&1 &), or pass a larger timeout. Output before it stopped:"
+      : `Exit code: ${result.exitCode}`;
+    const details = off.offloaded
+      ? { command: params.command, exitCode: result.exitCode, outputPath: off.path, outputBytes: off.totalBytes, outputLines: off.totalLines, ...envRefs }
+      : { command: params.command, exitCode: result.exitCode, ...envRefs };
+    return {
+      content: [{ type: "text", text: `${head}\n${off.text}` }],
+      details: timedOut ? { ...details, timedOut: true, timeoutMs: timeout } : details,
+      ...(timedOut ? { isError: true } : {}),
+    };
+  } catch (err: any) {
+    const message = mask(String(err?.message ?? err));
+    return toolError(`Error: ${message}`, { command: params.command, error: message, ...envRefs });
+  }
 }
 
 function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: BashToolOptions = {}): AgentTool<typeof BashSchema> {
@@ -414,48 +473,69 @@ function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: 
       + "environment only, never written to files, and replaced with *** in the output (values shorter than 6 characters are not masked).",
     parameters: BashSchema,
     async execute(_toolCallId, params, signal) {
-      const timeout = bashTimeoutMs(params.timeout);
-      // Secrets are resolved here, on the host, and only the references ("service.key") are kept
-      // in details: the values exist in the command's environment and nowhere else.
-      const fromVault = resolveEnvFromVault(params.env_from_vault, opts.vault);
-      const envRefs = Object.keys(fromVault.refs).length > 0 ? { envFromVault: fromVault.refs } : {};
-      if (fromVault.errors.length > 0) {
-        const message = `env_from_vault: ${fromVault.errors.join("; ")}. The command was not run.`;
-        return toolError(`Error: ${message}`, { command: params.command, error: message, ...envRefs });
+      return runCommandWithVault("bash", params, { cwd, shell, toolOutputDir, ...(signal ? { signal } : {}) }, opts);
+    },
+  };
+}
+
+// === run_with_vault (agents on an external harness) ===
+
+/**
+ * A Polpo host tool for agents on Claude Code / Codex / OpenCode, whose own shell cannot read the
+ * vault: Polpo's bash with env_from_vault (runCommandWithVault), and nothing else.
+ */
+export const RUN_WITH_VAULT_TOOL = "run_with_vault";
+
+const RunWithVaultSchema = Type.Object({
+  command: Type.String({ description: "Shell command that uses the secrets as environment variables, e.g. curl -s -H \"Authorization: Bearer $OPENAI_API_KEY\" https://api.openai.com/v1/models" }),
+  env_from_vault: Type.Record(Type.String(), VaultRefSchema, {
+    description: "Secrets from your vault as environment variables of this command only: { VAR_NAME: \"service.key\" }, "
+      + "e.g. { \"OPENAI_API_KEY\": \"openai.api_key\" }. Names: uppercase letters, digits and _ (not PATH, HOME or LD_*). "
+      + "vault_list shows your services and their key names.",
+  }),
+  cwd: Type.Optional(Type.String({ description: "Directory to run in, absolute or relative to your working directory (default: your working directory)" })),
+  timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 120000, 2 minutes). A value below 1000 is read as seconds (300 = 5 minutes)" })),
+});
+
+/**
+ * Is run_with_vault granted? Without an allowedTools list, yes (as every core tool). With one: when
+ * it names run_with_vault, or bash (a bash grant already means "commands with env_from_vault" on
+ * Polpo's engine); wildcards are honoured. "vault_*" does not grant it: it is about the vault
+ * tools, not about running commands.
+ */
+export function grantsRunWithVault(allowedTools: readonly string[] | undefined): boolean {
+  if (!allowedTools) return true;
+  return expandToolWildcards([...allowedTools], [...ALL_TOOL_NAMES, RUN_WITH_VAULT_TOOL])
+    .some((a) => { const n = a.trim().toLowerCase(); return n === RUN_WITH_VAULT_TOOL || n === "bash"; });
+}
+
+/**
+ * run_with_vault: one command with secrets from the agent's vault as environment variables, on the
+ * run's computer (its remote VM's shell, or this server's), exactly as bash's env_from_vault: never
+ * written to disk, *** in the output (plus the run's own masker), never shown to the model.
+ */
+export function createRunWithVaultTool(cwd: string, shell: Shell, toolOutputDir: string, opts: BashToolOptions = {}): AgentTool<typeof RunWithVaultSchema> {
+  return {
+    name: RUN_WITH_VAULT_TOOL,
+    label: "Run With Vault Secrets",
+    description: "Run one shell command on your computer with secrets from your Polpo vault as environment variables of that command only. "
+      + "Use it whenever a command needs a credential you keep in the vault (API key, token, password): your own shell cannot read the vault. "
+      + "Example: { \"command\": \"curl -s -H \\\"Authorization: Bearer $OPENAI_API_KEY\\\" https://api.openai.com/v1/models\", "
+      + "\"env_from_vault\": { \"OPENAI_API_KEY\": \"openai.api_key\" } }. "
+      + "The values are never shown to you, never written to files, and appear as *** in the output (values shorter than 6 characters are not masked). "
+      + "vault_list and vault_get show your services and their key names. Never copy a secret into a file, the chat or an outcome; "
+      + "for commands without secrets use your own shell. Default timeout 2 minutes (timeout in ms; below 1000 it is seconds).",
+    parameters: RunWithVaultSchema,
+    async execute(_toolCallId, params, signal) {
+      const refs = params.env_from_vault && typeof params.env_from_vault === "object" ? params.env_from_vault : {};
+      if (Object.keys(refs).length === 0) {
+        const message = "env_from_vault is empty: name at least one secret, e.g. { \"API_KEY\": \"service.key\" } (vault_list shows them). "
+          + "For a command without secrets use your own shell. The command was not run.";
+        return toolError(`Error: ${message}`, { command: params.command, error: message });
       }
-      // Every value (and its base64/URL-encoded forms) becomes *** before the output reaches the
-      // model, the tool result, the offloaded file, activity logs and transcripts.
-      const mask = createSecretMasker(fromVault.secrets);
-      const started = Date.now();
-      try {
-        const extra = opts.commandEnv ? await opts.commandEnv().catch(() => ({} as Record<string, string>)) : {};
-        const env = { ...extra, ...fromVault.env };
-        const result = await shell.execute(params.command, {
-          cwd, timeout, ...(signal ? { signal } : {}), ...(Object.keys(env).length > 0 ? { env } : {}),
-        });
-        const timedOut = result.timedOut === true
-          || (result.exitCode !== 0 && Date.now() - started >= timeout && /timed? ?out/i.test(result.stderr));
-        let output = mask(result.stdout + (result.stderr ? "\n" + result.stderr : ""));
-        if (!output.trim()) output = "(no output)";
-        // Above the limit: the full output goes to a private file, the model gets
-        // head + tail (the tail weighs more: errors and summaries come last).
-        const off = await offloadToolOutput(output, { tool: "bash", dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, headRatio: 1 / 3, fs: opts.fs });
-        const head = timedOut
-          ? `Error: the command timed out after ${formatSeconds(timeout)} and was stopped. Run long-lived servers and watchers in the background `
-            + "(nohup … > log 2>&1 &), or pass a larger timeout. Output before it stopped:"
-          : `Exit code: ${result.exitCode}`;
-        const details = off.offloaded
-          ? { command: params.command, exitCode: result.exitCode, outputPath: off.path, outputBytes: off.totalBytes, outputLines: off.totalLines, ...envRefs }
-          : { command: params.command, exitCode: result.exitCode, ...envRefs };
-        return {
-          content: [{ type: "text", text: `${head}\n${off.text}` }],
-          details: timedOut ? { ...details, timedOut: true, timeoutMs: timeout } : details,
-          ...(timedOut ? { isError: true } : {}),
-        };
-      } catch (err: any) {
-        const message = mask(String(err?.message ?? err));
-        return toolError(`Error: ${message}`, { command: params.command, error: message, ...envRefs });
-      }
+      // the computer's paths (a remote VM is POSIX; so is this server)
+      const dir = typeof params.cwd === "string" && params.cwd.trim() ? posix.resolve(cwd, params.cwd.trim()) : cwd;
+      return runCommandWithVault(RUN_WITH_VAULT_TOOL, { ...params, env_from_vault: refs }, { cwd: dir, shell, toolOutputDir, ...(signal ? { signal } : {}) }, opts);
     },
   };
 }
@@ -705,6 +785,15 @@ export interface SystemToolsOptions {
   sandboxProvider?: string;
   /** Extra environment for bash commands, per call (the agent's browser: CDP_URL, DISPLAY). */
   commandEnv?: () => Promise<Record<string, string>>;
+  /**
+   * The tools are Polpo host tools of an agent on an external harness (Claude Code, Codex,
+   * OpenCode), whose own shell cannot read the vault: run_with_vault is added (when allowedTools
+   * grants it: grantsRunWithVault), and vault_get / vault_list never return secret values and
+   * point to run_with_vault instead of bash's env_from_vault.
+   */
+  harnessHost?: boolean;
+  /** The run's own secret masker (vault_create_login values), applied to run_with_vault output too. */
+  runMask?: (text: string) => string;
 }
 
 /**
@@ -756,7 +845,16 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
 
   // vault_get + vault_list are always included — core tools for credential access
   if (vault) {
-    tools.push(...createVaultToolsCore(vault, { sandboxProvider: options.sandboxProvider }));
+    tools.push(...createVaultToolsCore(vault, options.harnessHost
+      ? { sandboxProvider: options.sandboxProvider, secretsHidden: true, commandTool: RUN_WITH_VAULT_TOOL }
+      : { sandboxProvider: options.sandboxProvider }));
+  }
+
+  // an external harness's agent: commands with vault secrets through Polpo (its own shell has none)
+  if (options.harnessHost && vault && grantsRunWithVault(allowedTools)) {
+    tools.push(createRunWithVaultTool(cwd, _shell, toolOutputDir, {
+      vault, fs: _fs, ...(options.commandEnv ? { commandEnv: options.commandEnv } : {}), ...(options.runMask ? { mask: options.runMask } : {}),
+    }));
   }
 
   return tools;
@@ -814,6 +912,8 @@ export type ExtendedToolName = SystemToolName
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_TOOL_NAMES,
+  // a host tool of agents on an external harness only (Claude Code, Codex, OpenCode)
+  RUN_WITH_VAULT_TOOL,
   ...ALL_BROWSER_TOOL_NAMES,
   ...ALL_HTTP_TOOL_NAMES,
   ...ALL_EMAIL_TOOL_NAMES,
@@ -886,6 +986,10 @@ export interface CreateAllToolsOptions {
   shell?: Shell;
   /** The run's effective sandbox provider: anything but "local" hides secret values from vault_get. */
   sandboxProvider?: string;
+  /** Host tools of an agent on an external harness: run_with_vault, and vault_get without values (SystemToolsOptions.harnessHost). */
+  harnessHost?: boolean;
+  /** The run's own secret masker, for run_with_vault output (SystemToolsOptions.runMask). */
+  runMask?: (text: string) => string;
   /** Where the run comes from, for the media log's provenance (image tools): its task, mission or chat. */
   mediaContext?: { taskId?: string; missionId?: string; sessionId?: string };
   /**
@@ -943,7 +1047,10 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
       ...(options.browserProfileDir ? { profileName: browserProfileName(options.browserProfileDir) } : {}), remote: await shellIsRemote(options.shell),
     })
     : undefined;
-  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir, sandboxProvider: options.sandboxProvider, ...(commandEnv ? { commandEnv } : {}) }));
+  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, {
+    toolOutputDir, sandboxProvider: options.sandboxProvider, ...(commandEnv ? { commandEnv } : {}),
+    ...(options.harnessHost ? { harnessHost: true } : {}), ...(options.runMask ? { runMask: options.runMask } : {}),
+  }));
 
   // Ink tools (always included when polpoDir is available)
   if (options.polpoDir) {

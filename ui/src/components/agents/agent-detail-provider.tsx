@@ -24,7 +24,7 @@ import type {
   Task,
 } from "@polpo-ai/react";
 import { taskStatusOrder } from "@/lib/agent-meta";
-import { toolCategories } from "@/lib/agent-meta";
+import { categoryEnabled, toolCategories } from "@/lib/agent-meta";
 import { isNotReached } from "@/lib/task-not-reached";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { AgentDetailContext } from "./agent-detail-context";
@@ -127,7 +127,7 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
     [agent],
   );
   const enabledCategories = useMemo(
-    () => toolCategories.filter(c => agentAllowedTools.some(t => t.toLowerCase().startsWith(c.prefix))),
+    () => toolCategories.filter(c => categoryEnabled(c, agentAllowedTools)),
     [agentAllowedTools],
   );
 

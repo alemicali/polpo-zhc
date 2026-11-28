@@ -55,7 +55,7 @@ const agentFields = {
   model: z.string().optional().describe("provider:model (polpo_models_list); omit for the default"),
   systemPrompt: z.string().optional().describe("Its instructions: how it works, what it must and must not do"),
   allowedTools: z.array(z.string()).optional().describe("Tools it may use (patterns allowed, e.g. browser_*, artifact_* to make artifacts people open in Polpo, "
-    + "mcp__linear__*); omit for the defaults. An agent on a harness engine (Claude Code, Codex, OpenCode) gets the Polpo tools listed here too (artifacts, email, data…), run on the Polpo server"),
+    + "mcp__linear__*); omit for the defaults. An agent on a harness engine (Claude Code, Codex, OpenCode) gets the Polpo tools listed here too (artifacts, email, data…), run on the Polpo server, and run_with_vault (commands on its computer with vault secrets as env vars, masked; granted by run_with_vault or bash, or with no list)"),
   skills: z.array(z.string()).optional().describe("Names of skills it uses"),
   identity: identity.optional().describe("How it presents itself"),
   reportsTo: z.string().optional().describe("The agent it reports to (its manager: it can always escalate to it)"),

@@ -1071,6 +1071,12 @@ export async function buildAgentToolset(o: {
   task?: Task;
   /** Without a task (a chat): where send_notification records it came from. */
   notifyOrigin?: { sessionId?: string };
+  /**
+   * The tools become host tools of an agent on an external harness (Claude Code, Codex, OpenCode:
+   * toHarnessHostTools): run_with_vault is added (its own shell cannot read the vault), and
+   * vault_get / vault_list never return secret values and point to it.
+   */
+  harnessHost?: boolean;
 }): Promise<AgentToolset> {
   const { agentConfig, cwd, ctx, outputDir, remoteFs, shell, browserProfileDir } = o;
   // A remote computer: the tools' path arguments are the computer's paths (their I/O goes through
@@ -1085,7 +1091,13 @@ export async function buildAgentToolset(o: {
   const vault = resolveAgentVault(vaultEntries);
 
   // Rebuild tools with vault resolved
-  let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
+  // the run's secrets learned while it runs (vault_create_login): output is masked with them
+  const runSecrets = ctx?.runSecrets ?? createRunSecrets();
+  // an external harness's host tools: run_with_vault, and vault_get / vault_list without values
+  const harnessHost = o.harnessHost === true;
+  let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, {
+    sandboxProvider, ...(harnessHost ? { harnessHost: true, runMask: runSecrets.mask } : {}),
+  });
   if (ctx?.polpoDir) {
     allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
   }
@@ -1115,6 +1127,7 @@ export async function buildAgentToolset(o: {
       shell,
       fs: remoteFs,
       sandboxProvider,
+      ...(harnessHost ? { harnessHost: true, runMask: runSecrets.mask } : {}),
       agentName: agentConfig.name,
       ...(o.task ? { mediaContext: { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } } : {}),
       // unset: headed on a remote computer, headless here
@@ -1180,12 +1193,12 @@ export async function buildAgentToolset(o: {
   // "vault_create_login" / "vault_*"). A task run asks the server over the socket (the agent comes from
   // the run record); in the server process the vault store directly. The value goes to the run's
   // masker and its resolved vault (browser_fill from_vault finds it at once). Every engine (host tool).
-  const runSecrets = ctx?.runSecrets ?? createRunSecrets();
   {
     const taken = new Set(allTools.map((tool) => tool.name));
     const origin = o.task ? { taskId: o.task.id, ...(ctx?.runId ? { runId: ctx.runId } : {}) } : (o.notifyOrigin ?? {});
     const access = ctx?.vaultLogin ?? (ctx?.vaultStore ? localVaultLoginAccess(ctx.vaultStore, agentConfig, origin) : undefined);
-    allTools.push(...createVaultLoginTools(agentConfig, access, { vault, secrets: runSecrets }).filter((tool) => !taken.has(tool.name)));
+    allTools.push(...createVaultLoginTools(agentConfig, access, { vault, secrets: runSecrets, ...(harnessHost ? { commandTool: "run_with_vault" as const } : {}) })
+      .filter((tool) => !taken.has(tool.name)));
   }
   // Talking to other agents while working the task (every engine: these become host tools for a
   // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the
