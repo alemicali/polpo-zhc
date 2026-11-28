@@ -7,7 +7,7 @@
  */
 import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
-import { connectorGrants, type ConnectorConfig } from "@polpo-ai/core";
+import { connectorGrants, connectorOwner, connectorVisibleTo, type ConnectorConfig } from "@polpo-ai/core";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import type { ConnectorManager } from "../mcp/manager.js";
 import { allowPrivateNetwork } from "../mcp/net.js";
@@ -38,7 +38,8 @@ export const CONNECTOR_TOOLS: Tool[] = [
   },
   {
     name: "connector_update_access",
-    description: "Change who may use a connector's tools (agents: the full list or \"*\"; addAgents / removeAgents to change it), whether Polpo may, and turn it on or off.",
+    description: "Change who may use a connector's tools (agents: the full list or \"*\"; addAgents / removeAgents to change it), whether Polpo may, and turn it on or off. "
+      + "An agent's own (personal) connector can only be enabled for that agent: other agents or \"*\" are refused (connector_update with owner changes the scope).",
     parameters: Type.Object({
       id: Type.String({ description: "Connector id" }),
       agents: Type.Optional(Agents),
@@ -78,10 +79,12 @@ export function noAccessNote(agent: string, c: Pick<ConnectorConfig, "id" | "nam
 
 function describe(c: ConnectorConfig): string {
   const who = [c.access.agents === "*" ? "every agent" : c.access.agents.length ? `agents: ${c.access.agents.join(", ")}` : "no agent", c.access.polpo ? "Polpo" : ""].filter(Boolean).join(" + ");
+  const owner = connectorOwner(c);
+  const scope = owner ? `${owner}'s own (personal: only ${owner} can ever use it)` : "org";
   const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.type === "hosted" ? `hosted by Polpo${c.hostedVersion ? ` (v${c.hostedVersion})` : ""}` : c.transport.url;
   const status = c.enabled ? (c.status ?? "not connected yet") : "disabled";
   return `- ${connectorLabel(c)} [${c.id}${c.catalogId && c.catalogId !== c.id ? `, another ${c.catalogId} account` : ""}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
-    + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*${c.iconAsset ? `; icon: ${c.iconAsset.pinned ? "set by the person" : `found (${c.iconAsset.source})`}` : ""}`;
+    + `auth ${c.auth.type}; scope ${scope}; used by ${who}; ${where}; tools mcp__${c.id}__*${c.iconAsset ? `; icon: ${c.iconAsset.pinned ? "set by the person" : `found (${c.iconAsset.source})`}` : ""}`;
 }
 
 async function oauthLink(ctx: ConnectorToolContext, id: string): Promise<string> {
@@ -116,6 +119,9 @@ export async function executeConnectorTool(name: string, args: Record<string, un
         if (typeof args.tools === "string" && args.tools) {
           const connector = manager.store.get(args.tools);
           if (!connector) return `No connector "${args.tools}".`;
+          if (agent && !connectorVisibleTo(connector, agent)) {
+            return `${connectorLabel(connector)} (${connector.id}) belongs to agent "${connectorOwner(connector)}" (a personal connector): ${agent} can never use it.`;
+          }
           const granted = !agent || connectorGrants(connector, agent);
           const tools = await manager.listTools(connector.id);
           const list = tools.length
@@ -127,7 +133,8 @@ export async function executeConnectorTool(name: string, args: Record<string, un
         const list = manager.store.list();
         if (agent) {
           const mine = list.filter((c) => connectorGrants(c, agent));
-          const others = list.filter((c) => !connectorGrants(c, agent));
+          // another agent's own connectors are left out: they can never be granted to this one
+          const others = list.filter((c) => connectorVisibleTo(c, agent) && !connectorGrants(c, agent));
           const toolsOf = (c: ConnectorConfig) => {
             const picked = selection?.[c.id];
             return picked === undefined || picked === "*" ? "all its tools" : picked.length ? `tools: ${picked.join(", ")}` : "no tools (its connectorTools select none)";

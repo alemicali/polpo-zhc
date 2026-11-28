@@ -46,6 +46,9 @@ export interface ConnectorAccess {
   polpo: boolean;
 }
 
+/** The organization's (its access decides which agents use it) or one agent's own (only that agent). */
+export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string };
+
 export interface ConnectorOAuthSettings {
   clientId?: string;
   app?: string;
@@ -66,6 +69,8 @@ export interface Connector {
   hostedVersion?: string;
   auth: { type: ConnectorAuthType; headerNames?: string[]; oauth?: ConnectorOAuthSettings };
   access: ConnectorAccess;
+  /** Who it belongs to; missing = the organization. An agent's own is only ever enabled for that agent. */
+  scope?: ConnectorScope;
   enabled: boolean;
   catalogId?: string;
   icon?: ConnectorIconRef;
@@ -183,6 +188,7 @@ export interface ConnectorInput {
   transport?: Partial<Connector["transport"]>;
   auth?: { type?: ConnectorAuthType; headerNames?: string[]; oauth?: Partial<ConnectorOAuthSettings> };
   access?: Partial<ConnectorAccess>;
+  scope?: ConnectorScope;
   enabled?: boolean;
   toolTimeoutMs?: number;
   toolPolicy?: Record<string, ConnectorToolPolicy>;
@@ -453,6 +459,22 @@ export function fillTemplate(template: string, values: Record<string, string>): 
 
 export function agentHasAccess(access: ConnectorAccess, agent: string): boolean {
   return access.agents === "*" || access.agents.includes(agent);
+}
+
+/** The agent an agent-scoped connector belongs to; undefined for an org connector. */
+export function connectorOwner(connector: Pick<Connector, "scope">): string | undefined {
+  return connector.scope?.kind === "agent" ? connector.scope.agent : undefined;
+}
+
+/** At `agent`'s disposal at all: every org connector and its own ones (never another agent's own). */
+export function connectorVisibleTo(connector: Pick<Connector, "scope">, agent: string): boolean {
+  const owner = connectorOwner(connector);
+  return owner === undefined || owner === agent;
+}
+
+/** Enabled for `agent` (the server's rule: another agent's own connector never is, whatever its access says). */
+export function connectorEnabledFor(connector: Pick<Connector, "scope" | "access">, agent: string): boolean {
+  return connectorVisibleTo(connector, agent) && agentHasAccess(connector.access, agent);
 }
 
 /** Grant / revoke one agent. Revoking from "every agent" keeps every other known agent. */

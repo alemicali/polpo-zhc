@@ -3,7 +3,7 @@
  * "Tools for this task" card and editor. Mirrors @polpo-ai/core task-tool-scope.ts: the scope
  * only narrows what the agent has; no scope = the task inherits everything from its agent.
  */
-import { agentHasAccess, connectorToolsEntry, type AgentConnectorTools, type Connector } from "@/lib/connectors-api";
+import { connectorEnabledFor, connectorToolsEntry, type AgentConnectorTools, type Connector } from "@/lib/connectors-api";
 
 export interface TaskToolScope {
   connectors?: string[] | "none";
@@ -34,7 +34,7 @@ export function agentBuiltinTools(agent: { allowedTools?: string[] } | undefined
 /** Connectors the agent can use: on, granted to it, and not narrowed to no tool on the agent. */
 export function agentConnectors(connectors: Connector[], agent: { name: string; connectorTools?: AgentConnectorTools } | undefined): Connector[] {
   if (!agent) return [];
-  return connectors.filter((c) => c.enabled && agentHasAccess(c.access, agent.name)
+  return connectors.filter((c) => c.enabled && connectorEnabledFor(c, agent.name)
     && !(Array.isArray(agent.connectorTools?.[c.id]) && agent.connectorTools![c.id]!.length === 0));
 }
 

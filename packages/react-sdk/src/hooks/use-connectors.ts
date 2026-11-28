@@ -16,6 +16,18 @@ export function connectorLabel(c: Pick<Connector, "name" | "account">): string {
   return account && !c.name.toLowerCase().includes(account.toLowerCase()) ? `${c.name} – ${account}` : c.name;
 }
 
+/** The agent an agent-scoped connector belongs to; undefined for an org connector. */
+export function connectorOwner(c: Pick<Connector, "scope">): string | undefined {
+  return c.scope?.kind === "agent" ? c.scope.agent : undefined;
+}
+
+/** Whether `agent` may use the connector: enabled for it, and not another agent's own (the server's rule). */
+export function connectorEnabledFor(c: Pick<Connector, "access" | "scope">, agent: string): boolean {
+  const owner = connectorOwner(c);
+  if (owner !== undefined && owner !== agent) return false;
+  return c.access.agents === "*" || c.access.agents.includes(agent);
+}
+
 /**
  * The instance's connectors (external apps over MCP): status, the signed-in account (several
  * accounts of one app have their own ids: gmail, gmail-2…) and who may use them. With `agent`,
@@ -42,7 +54,7 @@ export function useConnectors(opts: { agent?: string } = {}): UseConnectorsRetur
   }, [fetch_]);
 
   const connectors = useMemo(() => (opts.agent
-    ? all.filter((c) => c.access.agents === "*" || c.access.agents.includes(opts.agent!))
+    ? all.filter((c) => connectorEnabledFor(c, opts.agent!))
     : all), [all, opts.agent]);
 
   return { connectors, isLoading, error, refetch: fetch_ };

@@ -15,7 +15,7 @@ import { unknownAgents } from "./tasks.js";
 
 type Connector = {
   id: string; name: string; account?: string; description?: string; transport: { type: string; url?: string }; auth: { type: string; oauth?: { app?: string } };
-  access: { agents: string[] | "*"; polpo: boolean }; enabled: boolean; catalogId?: string; status?: string; lastError?: string; toolCount?: number;
+  access: { agents: string[] | "*"; polpo: boolean }; scope?: { kind: "org" } | { kind: "agent"; agent: string }; enabled: boolean; catalogId?: string; status?: string; lastError?: string; toolCount?: number;
   lastConnectedAt?: string; toolPolicy?: Record<string, string>; iconUrl?: string; iconAsset?: { source?: string };
   secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean } };
 };
@@ -26,15 +26,22 @@ type CatalogEntry = {
 
 const connectorItem = z.object({
   id: z.string(), name: z.string(), account: z.string().optional().describe("The signed-in account, when known"), status: z.string(), enabled: z.boolean(), url: z.string().optional(), auth: z.string(),
-  agents: z.union([z.array(z.string()), z.literal("*")]), polpo: z.boolean(), tool_count: z.number().int().optional(),
+  agents: z.union([z.array(z.string()), z.literal("*")]), polpo: z.boolean(),
+  scope: z.enum(["org", "agent"]).describe("org: the organization's (its agents list decides who uses it); agent: one agent's own (owner), only that agent can ever use it"),
+  owner: z.string().optional().describe("scope agent: the agent it belongs to"),
+  tool_count: z.number().int().optional(),
   authorized: z.boolean().optional(), credentials_set: z.boolean().optional(), last_error: z.string().optional(), catalog_id: z.string().optional(),
   tool_policy: z.record(z.string(), z.string()).optional(),
   agent_tools: z.union([z.literal("*"), z.array(z.string())]).optional(),
   icon_url: z.string().optional().describe("The connector's icon: a catalog connector's official one, else the one found for it or set by the person (the API URL needs the instance's auth). Absent: no icon"),
 });
 
+/** The agent an agent-scoped connector belongs to. */
+const ownerOf = (c: Connector) => (c.scope?.kind === "agent" ? c.scope.agent : undefined);
+/** Another agent's own connector: never offered to `agent`. */
+const visibleTo = (c: Connector, agent: string) => { const o = ownerOf(c); return o === undefined || o === agent; };
 /** Whether the connector's access lets `agent` use it (the API's connectorGrants, on the view). */
-const grants = (c: Connector, agent: string) => c.enabled && (c.access.agents === "*" || c.access.agents.includes(agent));
+const grants = (c: Connector, agent: string) => c.enabled && visibleTo(c, agent) && (c.access.agents === "*" || c.access.agents.includes(agent));
 
 /** A server URL without what could carry a key (user info, query, fragment). */
 function safeUrl(url: string): string {
@@ -54,6 +61,7 @@ const relative: Bases = { api: (p) => p, dashboard: (p) => p };
 const baseView = (c: Connector, bases: Bases = relative) => ({
   id: c.id, name: c.name, ...(c.account ? { account: c.account } : {}), status: c.enabled ? c.status ?? "disconnected" : "disabled", enabled: c.enabled,
   ...(c.transport.url ? { url: safeUrl(c.transport.url) } : {}), auth: c.auth.type, agents: c.access.agents, polpo: c.access.polpo,
+  scope: ownerOf(c) ? "agent" as const : "org" as const, ...(ownerOf(c) ? { owner: ownerOf(c) } : {}),
   ...(c.toolCount !== undefined ? { tool_count: c.toolCount } : {}),
   ...(c.auth.type === "oauth" ? { authorized: !!c.secrets?.oauth.authorized } : {}),
   ...(c.auth.type === "bearer" || c.auth.type === "headers" ? { credentials_set: !!(c.secrets?.bearerToken || c.secrets?.headers.length) } : {}),
@@ -62,7 +70,7 @@ const baseView = (c: Connector, bases: Bases = relative) => ({
   ...(c.iconUrl ? { icon_url: c.iconUrl.startsWith("/api/") ? bases.api(c.iconUrl) : bases.dashboard(c.iconUrl) } : {}),
 });
 const line = (c: ReturnType<typeof baseView>) => `- ${c.id} "${c.name}"${c.account && !c.name.includes(c.account) ? ` (${c.account})` : ""}${c.catalog_id && c.catalog_id !== c.id ? ` (another ${c.catalog_id} account)` : ""} [${c.status}] ${c.auth}${c.authorized === false ? " (not authorized)" : ""}${c.credentials_set === false ? " (no token)" : ""}`
-  + `${c.tool_count !== undefined ? `, ${c.tool_count} tools` : ""} · agents: ${c.agents === "*" ? "all" : c.agents.join(", ") || "none"}${c.polpo ? " + Polpo" : ""}${c.last_error ? ` · error: ${short(c.last_error, 100)}` : ""}`;
+  + `${c.tool_count !== undefined ? `, ${c.tool_count} tools` : ""}${c.owner ? ` · ${c.owner}'s own (personal)` : " · org"} · agents: ${c.agents === "*" ? "all" : c.agents.join(", ") || "none"}${c.polpo ? " + Polpo" : ""}${c.last_error ? ` · error: ${short(c.last_error, 100)}` : ""}`;
 
 async function loadConnector(deps: McpDeps, id: string) {
   const r = await apiGet(deps, `/connectors/${enc(id)}`);
@@ -114,6 +122,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     if (id) {
       const c = await loadConnector(deps, id);
       if (!c.ok) return c.status === 404 ? notFound(id) : apiError(c, `Reading connector ${id}`);
+      if (agent && !visibleTo(c.connector, agent)) {
+        return fail(`Connector ${id} belongs to agent "${ownerOf(c.connector)}" (a personal connector): agent "${agent}" can never use it.`);
+      }
       if (agent && !grants(c.connector, agent)) {
         return fail(`Agent "${agent}" has no access to connector ${id}${c.connector.enabled ? "" : " (it is turned off)"}: a task's tool scope never grants it. `
           + `Offer the person to grant it first (polpo_connector_update { id: "${id}", add_agents: ["${agent}"] }), then set the scope.`);
@@ -139,7 +150,8 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     if (!p) return fail(BAD_CURSOR);
     const empty = agent ? `No connectors are granted to ${agent}.` : "No connectors. Find one with polpo_connector_catalog.";
     // the ones the agent may not use: a task scope cannot pick them until they are granted
-    const denied = agent ? every.filter((c) => !grants(c, agent)) : [];
+    // (another agent's own connectors are left out: they can never be granted to this one)
+    const denied = agent ? every.filter((c) => visibleTo(c, agent) && !grants(c, agent)) : [];
     const deniedNote = denied.length
       ? `\n${agent} has no access to: ${denied.map((c) => `${c.id}${c.account ? ` (${c.account})` : ""}${c.enabled ? "" : " (turned off)"}`).join(", ")}. `
         + `A task's tool scope never grants: offer the person to grant one first (polpo_connector_update { id, add_agents: ["${agent}"] }), then set the scope.`
@@ -251,8 +263,10 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       transport: z.enum(["http", "sse"]).optional().describe("http (default: streamable HTTP, falls back to SSE) or sse"),
       auth: z.enum(["none", "oauth"]).optional().describe("For a custom URL: none or oauth. Default: detected; token-based servers are finished in the dashboard"),
       detect_only: z.boolean().optional().describe("Custom URL: only detect how to connect (transport, sign-in options with the recommended one, scopes, name); nothing is added"),
-      agents: z.union([z.array(z.string()), z.literal("*")]).optional().describe("Agents that may use its tools ('*' for all; default none)"),
-      polpo: z.boolean().optional().describe("Polpo may use its tools (default true)"),
+      agents: z.union([z.array(z.string()), z.literal("*")]).optional().describe("Agents that may use its tools ('*' for all; default none). With owner: only the owner (the default)"),
+      polpo: z.boolean().optional().describe("Polpo may use its tools (default true; false with owner)"),
+      owner: z.string().optional().describe("An agent's name: the connector is that agent's own (scope agent: a personal mailbox, its own account). "
+        + "Only that agent can ever use it; it is never offered to other agents. Omit for an organization connector (scope org, the default)"),
     },
     outputSchema: {
       connector: connectorItem.optional(), authorization_url: z.string().optional(), setup_url: z.string().optional(),
@@ -260,7 +274,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       next: z.string().describe("What to do next"),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async ({ catalog_id, url, name, id, transport, auth, detect_only, agents, polpo }) => {
+  }, async ({ catalog_id, url, name, id, transport, auth, detect_only, agents, polpo, owner }) => {
     if (!catalog_id && !url) return fail("Give catalog_id (polpo_connector_catalog) or the url of a remote MCP server.");
     if (detect_only) {
       if (catalog_id || !url) return fail("detect_only is for a custom url: a catalog entry already knows how it connects.");
@@ -280,9 +294,12 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     const detectedAuth = !auth && detected ? (detected.auth === "none" ? "none" : detected.auth === "bearer" ? "bearer" : "oauth") : undefined;
     transport ??= detected?.transport;
     name ??= detected?.name;
-    if (Array.isArray(agents)) {
-      const missing = await unknownAgents(deps, agents);
+    if (Array.isArray(agents) || owner) {
+      const missing = await unknownAgents(deps, [...(Array.isArray(agents) ? agents : []), ...(owner ? [owner] : [])]);
       if (missing) return fail(missing);
+    }
+    if (owner && (agents === "*" || (Array.isArray(agents) && agents.some((a) => a !== owner)))) {
+      return fail(`A connector of agent "${owner}" can only be enabled for ${owner}: drop agents (or pass ["${owner}"]).`);
     }
     let entry: CatalogEntry | undefined;
     if (catalog_id) {
@@ -301,6 +318,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       ...(auth ? { auth: { type: auth } }
         : detectedAuth ? { auth: { type: detectedAuth, ...(detectedAuth === "oauth" && detected?.scopes.length ? { oauth: { scopes: detected.scopes } } : {}) } } : {}),
       access: { ...(agents !== undefined ? { agents } : {}), ...(polpo !== undefined ? { polpo } : {}) },
+      ...(owner ? { scope: { kind: "agent", agent: owner } } : {}),
     });
     if (!r.ok) return apiError(r, "Adding the connector", /url|private|https/i.test(r.error) ? "Give a public https URL of a remote MCP server." : undefined);
     const c = r.data as Connector;
@@ -332,7 +350,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
   tool("connectors", "polpo_connector_update", {
     title: "Change a connector",
     description: "Change who may use a connector (agents: the full list or '*'; add_agents / remove_agents), whether Polpo may, turn it on or off, "
-      + "rename it, or set its tools' policy (allow, ask: the person approves each call in the chat, off: hidden). Only the fields given change.",
+      + "rename it, set its tools' policy (allow, ask: the person approves each call in the chat, off: hidden), or change its scope (owner: an agent's "
+      + "own connector, or null: the organization's). An agent's own connector can only be enabled for that agent: granting it to another agent or '*' "
+      + "is refused. Making an org connector an agent's own drops every other agent from it (the result says which). Only the fields given change.",
     inputSchema: {
       id: z.string().min(1).describe("The connector's id"),
       name: z.string().min(1).max(80).optional().describe("A new display name"),
@@ -343,10 +363,11 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       remove_agents: z.array(z.string()).optional().describe("Agents to take it from"),
       polpo: z.boolean().optional().describe("Polpo may use its tools"),
       tool_policy: z.record(z.string(), z.enum(["allow", "ask", "off"])).optional().describe("Per tool (the server's tool name): allow, ask or off; merged with the current policy"),
+      owner: z.string().nullable().optional().describe("Scope: an agent's name makes it that agent's own (scope agent; other agents lose it); null makes it the organization's (scope org; who has it stays the same)"),
     },
-    outputSchema: { connector: connectorItem, changed: z.array(z.string()) },
+    outputSchema: { connector: connectorItem, changed: z.array(z.string()), dropped_agents: z.array(z.string()).optional() },
     annotations: UPDATE,
-  }, async ({ id, name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy }) => {
+  }, async ({ id, name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy, owner }) => {
     const cur = await loadConnector(deps, id);
     if (!cur.ok) return cur.status === 404 ? notFound(id) : apiError(cur, `Reading connector ${id}`);
     const c = cur.connector;
@@ -356,16 +377,17 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       if (base === "*") return fail("It is granted to every agent: pass agents with the full list instead of add_agents / remove_agents.");
       nextAgents = [...new Set([...base, ...(add_agents ?? [])])].filter((a) => !(remove_agents ?? []).includes(a));
     }
-    if (Array.isArray(nextAgents)) {
-      const missing = await unknownAgents(deps, nextAgents);
+    if (Array.isArray(nextAgents) || owner) {
+      const missing = await unknownAgents(deps, [...(Array.isArray(nextAgents) ? nextAgents : []), ...(owner ? [owner] : [])]);
       if (missing) return fail(missing);
     }
     const body = {
+      ...(owner !== undefined ? { scope: owner ? { kind: "agent", agent: owner } : { kind: "org" } } : {}),
       ...(name !== undefined ? { name } : {}), ...(description !== undefined ? { description } : {}), ...(enabled !== undefined ? { enabled } : {}),
-      ...(nextAgents !== undefined || polpo !== undefined ? { access: { agents: nextAgents ?? c.access.agents, polpo: polpo ?? c.access.polpo } } : {}),
+      ...(nextAgents !== undefined || polpo !== undefined ? { access: { ...(nextAgents !== undefined ? { agents: nextAgents } : {}), ...(polpo !== undefined ? { polpo } : {}) } } : {}),
       ...(tool_policy ? { toolPolicy: { ...(c.toolPolicy ?? {}), ...tool_policy } } : {}),
     };
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give name, description, enabled, agents, add_agents, remove_agents, polpo or tool_policy.");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy or owner.");
     const r = await apiSend(deps, "PATCH", `/connectors/${enc(id)}`, body);
     if (!r.ok) return apiError(r, `Updating connector ${id}`);
     const after = r.data as Connector;
@@ -374,9 +396,16 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       ...(enabled !== undefined && enabled !== c.enabled ? ["enabled"] : []),
       ...(JSON.stringify(after.access.agents) !== JSON.stringify(c.access.agents) ? ["agents"] : []), ...(after.access.polpo !== c.access.polpo ? ["polpo"] : []),
       ...(tool_policy && JSON.stringify(after.toolPolicy ?? {}) !== JSON.stringify(c.toolPolicy ?? {}) ? ["tool_policy"] : []),
+      ...(ownerOf(after) !== ownerOf(c) ? ["scope"] : []),
     ];
+    // org → an agent's own: the other agents it was enabled for lose it
+    const newOwner = ownerOf(after);
+    const dropped = newOwner && newOwner !== ownerOf(c)
+      ? (c.access.agents === "*" ? ["*"] : c.access.agents.filter((a) => a !== newOwner)) : [];
+    const droppedNote = dropped.length ? `\nIt is now ${newOwner}'s own: ${dropped[0] === "*" ? "every other agent" : dropped.join(", ")} can no longer use it.` : "";
     const v = view(after);
-    return ok(changed.length ? `Updated ${id}: ${changed.join(", ")}.\n${line(v).slice(2)}` : `Nothing changed on ${id} (the values were the same).`, { connector: v, changed });
+    return ok(changed.length ? `Updated ${id}: ${changed.join(", ")}.\n${line(v).slice(2)}${droppedNote}` : `Nothing changed on ${id} (the values were the same).`,
+      { connector: v, changed, ...(dropped.length ? { dropped_agents: dropped } : {}) });
   });
 
   tool("connectors", "polpo_connector_test", {

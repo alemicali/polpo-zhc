@@ -50,6 +50,9 @@ const CONNECTORS = [
   { id: "gmail", name: "Gmail", account: "ada@acme.com", status: "connected", enabled: true, access: { agents: ["dev"], polpo: true } },
   { id: "gmail-2", name: "Gmail – info@acme.com", account: "info@acme.com", status: "needs_reauth", enabled: true, access: { agents: "*", polpo: false } },
   { id: "linear", name: "Linear", status: "connected", enabled: true, access: { agents: ["someone-else"], polpo: true } },
+  // dev's own calendar; Nina's personal mailbox (its access edited to "*": still never dev's)
+  { id: "cal-dev", name: "Calendar", status: "connected", enabled: true, access: { agents: ["dev"], polpo: false }, scope: { kind: "agent", agent: "dev" } },
+  { id: "mail-nina", name: "Mail Nina", status: "connected", enabled: true, access: { agents: "*", polpo: false }, scope: { kind: "agent", agent: "nina" } },
 ];
 
 const withFailure = (t: (typeof TASKS)[number]) => {
@@ -187,14 +190,16 @@ describe("the task and mission cards", () => {
     expect(card.agent.computer).toBe("gpu-box");
     expect(card.current).toMatchObject({ id: "t2", run: { engineLabel: "Claude Code Harness", computer: { label: "GPU box" } }, failure: { retryable: false } });
     expect(card.connectors).toEqual([
-      { id: "gmail", label: "Gmail – ada@acme.com", account: "ada@acme.com", status: "connected", tools: 2 },
-      { id: "gmail-2", label: "Gmail – info@acme.com", account: "info@acme.com", status: "needs_reauth", tools: "all" },
+      { id: "gmail", label: "Gmail – ada@acme.com", account: "ada@acme.com", status: "connected", tools: 2, scope: "org" },
+      { id: "gmail-2", label: "Gmail – info@acme.com", account: "info@acme.com", status: "needs_reauth", tools: "all", scope: "org" },
+      { id: "cal-dev", label: "Calendar", status: "connected", tools: "all", scope: "personal" },
     ]);
     const text = agentCardText(card);
     expect(text).toContain("Model: Sonnet 4.5 (Claude Code · Harness) on gpu-box.");
     expect(text).toMatch(/with Sonnet 4\.5 \(Claude Code · Harness\) on GPU box/);
     expect(text).toContain("It failed: Bedrock: model");
-    expect(text).toContain("Connectors: Gmail – ada@acme.com [gmail] (2 tools), Gmail – info@acme.com [gmail-2].");
+    expect(text).toContain("Connectors: Gmail – ada@acme.com [gmail] (2 tools), Gmail – info@acme.com [gmail-2], Calendar [cal-dev] (its own).");
+    expect(text).not.toContain("mail-nina");
   });
 });
 
@@ -234,7 +239,7 @@ describe("the cards through MCP", () => {
 
   it("polpo_agent_show carries the engine, the latest run, the failure and the connectors", async () => {
     const res = await call(deps(), "polpo_agent_show", { agent: "dev" });
-    expect(res.structuredContent).toMatchObject({ agent: { engine: { id: "claude-code" } }, connectors: [{ id: "gmail" }, { id: "gmail-2" }] });
+    expect(res.structuredContent).toMatchObject({ agent: { engine: { id: "claude-code" } }, connectors: [{ id: "gmail" }, { id: "gmail-2" }, { id: "cal-dev", scope: "personal" }] });
     expect(res.content[0].text).toContain("Connectors:");
   });
 

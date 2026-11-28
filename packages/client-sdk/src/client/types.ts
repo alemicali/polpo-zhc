@@ -2953,6 +2953,8 @@ export interface Connector {
   hostedVersion?: string;
   /** Who may use it: agent names or "*", and Polpo itself. */
   access: { agents: string[] | "*"; polpo: boolean };
+  /** Who it belongs to; missing = { kind: "org" }. An agent's own connector is only ever enabled for that agent. */
+  scope?: ConnectorScope;
   enabled: boolean;
   /** The catalog entry it came from (another account of the same app shares it). */
   catalogId?: string;
@@ -2964,6 +2966,37 @@ export interface Connector {
   toolCount?: number;
   lastConnectedAt?: string;
   secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean; clientRegistered?: boolean; pending?: boolean } };
+}
+
+/**
+ * Who a connector belongs to: the organization ("org": its access decides which agents use it) or one
+ * agent ("agent": only that agent can ever use it; access.agents is [agent] or [], never "*").
+ */
+export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string };
+
+/** POST /connectors (the fields an SDK caller sets; secrets are entered in the dashboard). */
+export interface ConnectorCreateInput {
+  catalogId?: string;
+  url?: string;
+  name?: string;
+  id?: string;
+  description?: string;
+  transport?: { type: "http" | "sse" };
+  auth?: { type: "none" | "bearer" | "headers" | "oauth" };
+  access?: { agents?: string[] | "*"; polpo?: boolean };
+  /** Default org. An agent's own: access defaults to that agent only, and Polpo off. */
+  scope?: ConnectorScope;
+  enabled?: boolean;
+}
+
+/** PATCH /connectors/:id: only the fields given change. scope org → agent drops the other agents (droppedAgents). */
+export interface ConnectorUpdateInput {
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  access?: { agents?: string[] | "*"; polpo?: boolean };
+  scope?: ConnectorScope;
+  toolPolicy?: Record<string, ConnectorToolPolicy>;
 }
 
 export interface ConnectorTool {

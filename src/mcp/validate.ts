@@ -3,9 +3,9 @@
  * split between configuration (connectors.json) and secrets (vault, write-only).
  */
 import {
-  CONNECTOR_ID_PATTERN, connectorSlug,
+  CONNECTOR_ID_PATTERN, connectorAccessProblem, connectorOwner, connectorSlug,
   type ConnectorAccess, type ConnectorAuth, type ConnectorAuthType, type ConnectorConfig, type ConnectorOAuthSettings,
-  type ConnectorToolPolicy, type ConnectorTransport,
+  type ConnectorScope, type ConnectorToolPolicy, type ConnectorTransport,
 } from "@polpo-ai/core";
 import { catalogEntry } from "./catalog.js";
 import { checkConnectorUrl, type UrlPolicy } from "./net.js";
@@ -35,6 +35,8 @@ export interface ConnectorInput {
   transport?: Partial<ConnectorTransport>;
   auth?: { type?: ConnectorAuthType; headerNames?: string[]; oauth?: Partial<ConnectorOAuthSettings> };
   access?: Partial<ConnectorAccess>;
+  /** Who it belongs to: { kind: "org" } (default) or { kind: "agent", agent } (only that agent may use it); null = org. */
+  scope?: ConnectorScope | null;
   enabled?: boolean;
   toolTimeoutMs?: number;
   toolPolicy?: Record<string, ConnectorToolPolicy>;
@@ -45,6 +47,8 @@ export interface ValidateContext extends UrlPolicy {
   /** Local processes (stdio) may be configured: only an authenticated admin API call. */
   allowStdio: boolean;
   existingIds: string[];
+  /** The agents of the workspace, when known: an agent scope must name one of them. */
+  agentNames?: string[];
 }
 
 const HEADER_NAME = /^[A-Za-z0-9-]{1,100}$/;
@@ -77,6 +81,24 @@ function normalizeAccess(input: Partial<ConnectorAccess> | undefined, base: Conn
     : [...new Set(strings(input.agents, "access.agents").map((a) => a.trim()).filter(Boolean))];
   if (Array.isArray(agents) && agents.some((a) => a.startsWith("$"))) throw new ConnectorInputError("access.agents: invalid agent name");
   return { agents, polpo: input.polpo === undefined ? base.polpo : input.polpo === true };
+}
+
+/** A scope from input: the agent-scoped one, or undefined for org (the default, stored as no field). */
+function normalizeScope(input: unknown, ctx: Pick<ValidateContext, "agentNames">): Extract<ConnectorScope, { kind: "agent" }> | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (typeof input !== "object" || Array.isArray(input)) throw new ConnectorInputError('scope must be { kind: "org" } or { kind: "agent", agent: "<name>" }');
+  const v = input as { kind?: unknown; agent?: unknown };
+  if (v.kind === "org") return undefined;
+  if (v.kind !== "agent") throw new ConnectorInputError('scope.kind must be "org" or "agent"');
+  const agent = typeof v.agent === "string" ? v.agent.trim() : "";
+  if (!agent || agent.startsWith("$")) throw new ConnectorInputError("scope.agent: the agent the connector belongs to is required");
+  if (ctx.agentNames && !ctx.agentNames.includes(agent)) throw new ConnectorInputError(`scope.agent: there is no agent "${agent}"`);
+  return { kind: "agent", agent };
+}
+
+function checkScopeAccess(scope: ConnectorScope | undefined, access: ConnectorAccess): void {
+  const problem = connectorAccessProblem(scope, access);
+  if (problem) throw new ConnectorInputError(problem);
 }
 
 function normalizeOAuth(input: Partial<ConnectorOAuthSettings> | undefined, base?: ConnectorOAuthSettings): ConnectorOAuthSettings | undefined {
@@ -208,13 +230,17 @@ export async function buildConnector(input: ConnectorInput, ctx: ValidateContext
     const oauth = normalizeOAuth(input.auth?.oauth, entry?.oauth ? { ...entry.oauth } : undefined);
     if (oauth && Object.keys(oauth).length) auth.oauth = oauth;
   }
+  const scope = normalizeScope(input.scope, ctx);
+  // default: Polpo may use it, agents are granted explicitly; an agent's own: that agent, not Polpo
+  const access = normalizeAccess(input.access, scope ? { agents: [scope.agent], polpo: false } : { agents: [], polpo: true });
+  checkScopeAccess(scope, access);
   const connector: ConnectorConfig = {
     id, name, kind: "mcp",
     ...(input.description ?? entry?.description ? { description: input.description ?? entry?.description } : {}),
     transport,
     auth,
-    // default: Polpo may use it; agents are granted explicitly
-    access: normalizeAccess(input.access, { agents: [], polpo: true }),
+    access,
+    ...(scope ? { scope } : {}),
     enabled: input.enabled !== false,
     ...(entry ? { catalogId: entry.id } : {}),
     ...(entry?.icon ? { icon: entry.icon } : {}),
@@ -235,7 +261,7 @@ function timeout(value: unknown): number {
 /** A change to an existing connector. Returns the patch and the secrets to write. */
 export async function applyConnectorPatch(
   current: ConnectorConfig, input: ConnectorInput, ctx: ValidateContext,
-): Promise<{ patch: Partial<ConnectorConfig>; secrets: Record<string, string | undefined>; reconnect: boolean }> {
+): Promise<{ patch: Partial<ConnectorConfig>; secrets: Record<string, string | undefined>; reconnect: boolean; droppedAgents?: string[] }> {
   if (input.id !== undefined && input.id !== current.id) throw new ConnectorInputError("A connector's id cannot change");
   const patch: Partial<ConnectorConfig> = {};
   let reconnect = false;
@@ -248,7 +274,26 @@ export async function applyConnectorPatch(
   }
   if (input.description !== undefined) patch.description = input.description;
   if (input.enabled !== undefined) { patch.enabled = input.enabled === true; reconnect = true; }
-  if (input.access !== undefined) patch.access = normalizeAccess(input.access, current.access);
+  // scope: org → agent keeps only the owner in access (the others are dropped and reported); agent → org keeps access
+  let droppedAgents: string[] | undefined;
+  let scope = current.scope?.kind === "agent" ? current.scope : undefined;
+  let access = current.access;
+  if (input.scope !== undefined) {
+    const next = normalizeScope(input.scope, ctx);
+    if (next?.agent !== connectorOwner(current)) {
+      patch.scope = next; // undefined: back to org (the field is dropped)
+      scope = next;
+      if (next) {
+        const had = current.access.agents === "*" ? ["*"] : current.access.agents.filter((a) => a !== next.agent);
+        const kept = current.access.agents === "*" || current.access.agents.includes(next.agent) ? [next.agent] : [];
+        if (had.length) droppedAgents = had;
+        access = { ...current.access, agents: kept };
+        patch.access = access;
+      }
+    }
+  }
+  if (input.access !== undefined) patch.access = access = normalizeAccess(input.access, access);
+  if (input.scope !== undefined || input.access !== undefined) checkScopeAccess(scope, access);
   if (input.toolTimeoutMs !== undefined) patch.toolTimeoutMs = timeout(input.toolTimeoutMs);
   if (input.toolPolicy !== undefined) patch.toolPolicy = normalizeToolPolicy(input.toolPolicy);
   if (input.transport !== undefined || input.url !== undefined) {
@@ -274,5 +319,5 @@ export async function applyConnectorPatch(
     reconnect = true;
   }
   if (Object.keys(values).length) reconnect = true;
-  return { patch, secrets: values, reconnect };
+  return { patch, secrets: values, reconnect, ...(droppedAgents ? { droppedAgents } : {}) };
 }
